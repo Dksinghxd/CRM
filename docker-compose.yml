@@ -1,0 +1,83 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: smartreach_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-smartreach}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smartreach_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-smartreach_crm}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U smartreach']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - smartreach_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: smartreach_backend
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-smartreach}:${POSTGRES_PASSWORD:-smartreach_pass}@postgres:5432/${POSTGRES_DB:-smartreach_crm}
+      JWT_SECRET: ${JWT_SECRET:-your_super_secret_jwt_key_change_in_production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      CHANNEL_SERVICE_URL: http://channel-service:5000
+      PORT: 4000
+      NODE_ENV: ${NODE_ENV:-production}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+    ports:
+      - '4000:4000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - smartreach_network
+    command: sh -c "npx prisma migrate deploy && npx prisma db seed && node dist/index.js"
+
+  channel-service:
+    build:
+      context: ./channel-service
+      dockerfile: Dockerfile
+    container_name: smartreach_channel
+    restart: always
+    environment:
+      PORT: 5000
+      BACKEND_CALLBACK_URL: http://backend:4000/api/channel/receipt
+      NODE_ENV: ${NODE_ENV:-production}
+    ports:
+      - '5000:5000'
+    networks:
+      - smartreach_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: smartreach_frontend
+    restart: always
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000/api}
+    ports:
+      - '3000:3000'
+    depends_on:
+      - backend
+    networks:
+      - smartreach_network
+
+volumes:
+  postgres_data:
+
+networks:
+  smartreach_network:
+    driver: bridge

@@ -1,0 +1,220 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── USER ─────────────────────────────────────────────────────────────────────
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      UserRole @default(ADMIN)
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaigns Campaign[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  VIEWER
+}
+
+// ─── CUSTOMER ─────────────────────────────────────────────────────────────────
+model Customer {
+  id               String    @id @default(cuid())
+  name             String
+  email            String    @unique
+  phone            String?
+  city             String?
+  gender           Gender?
+  age              Int?
+  joinedDate       DateTime  @default(now())
+  totalOrders      Int       @default(0)
+  totalSpent       Float     @default(0)
+  lastPurchaseDate DateTime?
+  tags             String[]
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  orders         Order[]
+  communications Communication[]
+
+  @@index([email])
+  @@index([city])
+  @@index([totalSpent])
+  @@index([lastPurchaseDate])
+  @@map("customers")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+// ─── ORDER ────────────────────────────────────────────────────────────────────
+model Order {
+  id           String      @id @default(cuid())
+  customerId   String
+  amount       Float
+  category     String
+  purchaseDate DateTime    @default(now())
+  channel      OrderChannel
+  status       OrderStatus @default(COMPLETED)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([purchaseDate])
+  @@index([category])
+  @@map("orders")
+}
+
+enum OrderChannel {
+  ONLINE
+  OFFLINE
+  MOBILE_APP
+}
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+// ─── SEGMENT ──────────────────────────────────────────────────────────────────
+model Segment {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  rules       Json     // Array of filter rules
+  operator    String   @default("AND") // AND | OR
+  customerCount Int    @default(0)
+  aiGenerated Boolean  @default(false)
+  aiPrompt    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  campaigns Campaign[]
+
+  @@map("segments")
+}
+
+// ─── CAMPAIGN ─────────────────────────────────────────────────────────────────
+model Campaign {
+  id          String         @id @default(cuid())
+  name        String
+  segmentId   String?
+  channel     CampaignChannel
+  subject     String?
+  message     String
+  headline    String?
+  cta         String?
+  status      CampaignStatus @default(DRAFT)
+  goal        String?
+  tone        String?
+  scheduledAt DateTime?
+  launchedAt  DateTime?
+  completedAt DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  userId String?
+  user   User?    @relation(fields: [userId], references: [id])
+  segment Segment? @relation(fields: [segmentId], references: [id])
+  communications Communication[]
+
+  // Aggregated stats (denormalized for speed)
+  totalSent      Int @default(0)
+  totalDelivered Int @default(0)
+  totalFailed    Int @default(0)
+  totalOpened    Int @default(0)
+  totalClicked   Int @default(0)
+  totalConverted Int @default(0)
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("campaigns")
+}
+
+enum CampaignChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+  PUSH
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  COMPLETED
+  FAILED
+  PAUSED
+}
+
+// ─── COMMUNICATION ────────────────────────────────────────────────────────────
+model Communication {
+  id           String              @id @default(cuid())
+  campaignId   String
+  customerId   String
+  channel      CampaignChannel
+  status       CommunicationStatus @default(PENDING)
+  message      String
+  externalId   String?             // ID from channel service
+  retryCount   Int                 @default(0)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  campaign Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  customer Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  events   CommunicationEvent[]
+
+  @@index([campaignId])
+  @@index([customerId])
+  @@index([status])
+  @@map("communications")
+}
+
+enum CommunicationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  OPENED
+  READ
+  CLICKED
+  CONVERTED
+}
+
+// ─── COMMUNICATION EVENT ──────────────────────────────────────────────────────
+model CommunicationEvent {
+  id              String   @id @default(cuid())
+  communicationId String
+  event           String   // sent | delivered | failed | opened | read | clicked | converted
+  metadata        Json?
+  timestamp       DateTime @default(now())
+
+  communication Communication @relation(fields: [communicationId], references: [id], onDelete: Cascade)
+
+  @@index([communicationId])
+  @@index([event])
+  @@index([timestamp])
+  @@map("communication_events")
+}
